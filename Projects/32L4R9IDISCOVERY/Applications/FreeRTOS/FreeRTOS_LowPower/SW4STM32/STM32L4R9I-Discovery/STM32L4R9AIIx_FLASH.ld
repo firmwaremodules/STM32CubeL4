@@ -38,11 +38,22 @@ _estack = 0x200A0000;    /* end of RAM */
 _Min_Heap_Size = 0x200;      /* required amount of heap  */
 _Min_Stack_Size = 0x400; /* required amount of stack */
 
+
+INCLUDE stm32-secure-patching-bootloader-linker-gcc_DISCO-L4R9I_v1.3.0.ld
+
+APPLI_region_intvec_start__  = STM32_SECURE_PATCHING_BOOTLOADER_SLOT0_START + VECTOR_SIZE;
+APPLI_region_ROM_start    = STM32_SECURE_PATCHING_BOOTLOADER_SLOT0_START  + VECTOR_SIZE + VECTOR_SIZE;
+APPLI_region_ROM_length   = STM32_SECURE_PATCHING_BOOTLOADER_SLOT0_END - APPLI_region_ROM_start + 1;
+APPLI_region_RAM_start    = STM32_SECURE_PATCHING_BOOTLOADER_RAM_START;
+APPLI_region_RAM_length    = 0x20005000 - APPLI_region_RAM_start;
+
+
 /* Specify the memory areas */
 MEMORY
 {
-RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 640K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 2048K
+ISR_VECTOR (rx)   : ORIGIN = APPLI_region_intvec_start__, LENGTH = VECTOR_SIZE
+RAM (xrw)      : ORIGIN = APPLI_region_RAM_start, LENGTH = APPLI_region_RAM_length
+FLASH (rx)      : ORIGIN = APPLI_region_ROM_start, LENGTH = APPLI_region_ROM_length
 }
 
 /* Define output sections */
@@ -54,7 +65,7 @@ SECTIONS
     . = ALIGN(8);
     KEEP(*(.isr_vector)) /* Startup code */
     . = ALIGN(8);
-  } >FLASH
+  } >ISR_VECTOR
 
   /* The program code and other data goes into FLASH */
   .text :
@@ -166,6 +177,15 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM
+
+
+  /* Extra ROM section (last one) to make sure the binary size is a multiple of the AES block size (16 bytes) */
+  .align16 :
+  {
+    . = . + 1;         /* _edata=. is aligned on 8 bytes so could be aligned on 16 bytes: add 1 byte gap */
+    . = ALIGN(16) - 1; /* increment the location counter until next 16 bytes aligned address (-1 byte)   */
+    BYTE(0);           /* allocate 1 byte (value is 0) to be a multiple of 16 bytes                      */
+  } > FLASH
 
   
 
