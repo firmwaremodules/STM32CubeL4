@@ -1,0 +1,7 @@
+.cproject_org
+.project_org
+*.launch
+.settings
+Debug
+Release
+*.log
