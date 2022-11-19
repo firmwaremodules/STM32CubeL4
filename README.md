@@ -1,4 +1,22 @@
-# STM32CubeL4 MCU Firmware Package
+# STM32 Secure Patching Bootloader Reference Project Integrations for STM32L4
+
+This repository is a fork of the main STM32CubeL4 repository.  We have integrated our bootloader with the projects listed below.  You can use these projects as references or starting points for your own bootloader integrations.
+
+The bootloader is incorporated as a *subrepo* `Bootloader`.  To build the reference projects you must init and checkout the bootloader subrepo as well:
+
+* `git clone --recursive https://github.com/firmwaremodules/STM32CubeL4`
+
+or for already cloned repository without --recursive:
+
+* `git submodule update --init`
+
+| Project |
+| --- |
+| |
+
+<hr>
+
+## STM32CubeL4 MCU Firmware Package
 
 ![latest tag](https://img.shields.io/github/v/tag/STMicroelectronics/STM32CubeL4.svg?color=brightgreen)
 
