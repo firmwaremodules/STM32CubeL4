@@ -31,6 +31,14 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/
+
+/* Constants used by Serial Command Line Mode */
+#define TX_TIMEOUT                              ((uint32_t)100U)
+#define RX_TIMEOUT                              ((uint32_t)1000U)
+
+#define BOARD_STATUS_OK                         0
+#define BOARD_STATUS_ERROR                      -1
+
 /* Exported macro ------------------------------------------------------------*/
 
 /* Use after variable allocation to have linker allocate to the OSPI flash segment.
@@ -48,6 +56,28 @@ extern "C" {
 #define FW_UPDATE_VERSION                       1
 
 /* Exported functions ------------------------------------------------------- */
+
+/* CRC
+* Hardware or SW (depending on device support) used for ymodem 16-bit CRC.
+* Hardware must always be powered up on Init.
+*/
+typedef enum
+{
+    BOARD_CRC_CONFIG_NONE = 0U,   /*!< None */
+    BOARD_CRC_CONFIG_32BIT,       /*!< Default configuration */
+    BOARD_CRC_CONFIG_16BIT        /*!< 16 bit configuration */
+} BOARD_CRC_ConfigTypeDef;
+/* APIs return 0 on success, < 0 on error. */
+int board_crc_init(void);
+int board_crc_deinit(void);
+int board_crc_config(BOARD_CRC_ConfigTypeDef eCRCConfg);
+uint32_t board_crc_calculate(uint32_t pBuffer[], uint32_t BufferLength);
+
+
+/* Bindings for the YMODEM firmware updater */
+int Board_COM_Transmit(uint8_t* Data, uint16_t uDataLength, uint32_t uTimeout);
+int Board_COM_Receive(uint8_t* Data, uint16_t uDataLength, uint32_t uTimeout);
+int Board_COM_Flush(void);
 
 #ifdef __cplusplus
 }

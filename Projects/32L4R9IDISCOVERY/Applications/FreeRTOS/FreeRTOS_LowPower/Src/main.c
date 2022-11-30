@@ -21,6 +21,7 @@
 #include "cmsis_os.h"
 #include "stm32_secure_patching_bootloader_interface_v1.3.0.h"
 #include "stm32l4r9i_discovery_ospi_nor.h"
+#include "fw_update_ymodem.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -64,6 +65,7 @@ much. */
 /* Private function prototypes -----------------------------------------------*/
 static void QueueReceiveThread(const void *argument);
 static void QueueSendThread(const void *argument);
+static void FirmwareUpdateThread(const void* argument);
 static void GPIO_ConfigAN(void);
 void SystemClock_Config(void);
 
@@ -144,6 +146,12 @@ int main(void)
 
   osThreadDef(TxThread, QueueSendThread, osPriorityBelowNormal, 0, configMINIMAL_STACK_SIZE);
   osThreadCreate(osThread(TxThread), NULL);
+
+  /* Thread to manage firmware update over YMODEM/UART.
+   This must be lower priority than other threads because of the way we're using HAL_UART's blocking timing mechanism. 
+  */
+  osThreadDef(FwUpdateThread, FirmwareUpdateThread, osPriorityLow, 0, configMINIMAL_STACK_SIZE);
+  osThreadCreate(osThread(FwUpdateThread), NULL);
 
   printf("Starting scheduler\n");
 
@@ -250,6 +258,56 @@ void PostSleepProcessing(uint32_t ulExpectedIdleTime)
   /* resume the HAL tick */
   HAL_ResumeTick();
 
+}
+
+
+static void PrintMainMenu(void)
+{
+    printf("\n------------------- Main Menu ----------------------------\n\n");
+    printf("  Download a new firmware image or patch via YMODEM ----- 1\n\n");
+}
+
+/* This is a quick and dirty port of ST's YMODEM updater code 
+It uses blocking delays which we'd ideally avoid in an RTOS environment. 
+*/
+static void FirmwareUpdateThread(const void* argument)
+{
+    uint8_t key = 0U;
+
+    PrintMainMenu();
+
+    for (;;)
+    {
+        while (1U)
+        {
+            /* Clean the input path */
+            Board_COM_Flush();
+
+            /* Receive input from UART.  Note that this timeout defines the
+             * loop period and the LED blink rate.  *Blocking delay*
+             * The RTOS works around this by preemptive task switching to higher priority
+             * threads.  However, during firmware update operations that access flash or
+             * the secure engine, there must be no other tasks that can use these resources.
+             * If this cannot be guaranteed, then task switching must be suspended around the
+             * APP_UPDATE_XXX APIs.
+             */
+            if (Board_COM_Receive(&key, 1U, RX_TIMEOUT) == BOARD_STATUS_OK)
+            {
+                switch (key)
+                {
+                case '1':
+                    FW_UPDATE_YMODEM_Run();
+                    break;
+                default:
+                    printf("Invalid option\n");
+                    break;
+                }
+
+                /*Print Main Menu message*/
+                PrintMainMenu();
+            }
+        }
+    }
 }
 
 /**
@@ -397,6 +455,112 @@ PUTCHAR_PROTOTYPE
 
     return ch;
 }
+
+/* Bindings for the YMODEM firmware updater */
+int Board_COM_Transmit(uint8_t* Data, uint16_t uDataLength, uint32_t uTimeout)
+{
+    return HAL_UART_Transmit(&hUart, (uint8_t*)Data, uDataLength, uTimeout);
+}
+
+/**
+  * @brief Receive Data.
+  * @param uDataLength: Data pointer to the Data to receive.
+  * @param uTimeout: Timeout duration.
+  * @retval Status of the Receive operation.
+  */
+int Board_COM_Receive(uint8_t* Data, uint16_t uDataLength, uint32_t uTimeout)
+{
+    return HAL_UART_Receive(&hUart, (uint8_t*)Data, uDataLength, uTimeout);
+}
+
+int Board_COM_Flush(void)
+{
+    /* Clean the input path */
+    __HAL_UART_FLUSH_DRREGISTER(&hUart);
+    return HAL_OK;
+}
+
+/* Bindings for YMODEM CRC */
+
+static CRC_HandleTypeDef    CrcHandle;
+
+int board_crc_init(void)
+{
+    /* Configure the peripheral clock */
+    __HAL_RCC_CRC_CLK_ENABLE();
+
+    /* Configure CRC with default polynomial - standard configuration */
+    return board_crc_config(BOARD_CRC_CONFIG_32BIT);
+}
+
+int board_crc_deinit(void)
+{
+    /* Disable the peripheral clock */
+    __HAL_RCC_CRC_CLK_DISABLE();
+    return BOARD_STATUS_OK;
+}
+
+int board_crc_config(BOARD_CRC_ConfigTypeDef eCRCConfg)
+{
+    int status = BOARD_STATUS_OK;
+
+    /* Switch to the selected configuration */
+    CrcHandle.Instance = CRC;
+
+    /* The input data are not inverted */
+    CrcHandle.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+
+    /* The output data are not inverted */
+    CrcHandle.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+
+    switch (eCRCConfg)
+    {
+    case BOARD_CRC_CONFIG_32BIT:
+        /* The Default polynomial is used */
+        CrcHandle.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
+        /* The default init value is used */
+        CrcHandle.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+        /* The input data are 32-bit long words */
+        CrcHandle.InputDataFormat = CRC_INPUTDATA_FORMAT_WORDS;
+        /* Valid parameter*/
+        break;
+
+    case BOARD_CRC_CONFIG_16BIT:
+        /* The CRC-16-CCIT polynomial is used */
+        CrcHandle.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_DISABLE;
+        CrcHandle.Init.GeneratingPolynomial = 0x1021U;
+        CrcHandle.Init.CRCLength = CRC_POLYLENGTH_16B;
+        /* The zero init value is used */
+        CrcHandle.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_DISABLE;
+        CrcHandle.Init.InitValue = 0U;
+        /* The input data are 8-bit long */
+        CrcHandle.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+        /* Valid parameter*/
+        break;
+
+    default:
+        /* Invalid parameter */
+        status = BOARD_STATUS_ERROR;
+        break;
+    }
+
+    if (status == BOARD_STATUS_OK)
+    {
+        if (HAL_CRC_Init(&CrcHandle) != HAL_OK)
+        {
+            status = BOARD_STATUS_ERROR;
+        }
+    }
+    return status;
+}
+
+uint32_t board_crc_calculate(uint32_t pBuffer[], uint32_t BufferLength)
+{
+    return HAL_CRC_Calculate(&CrcHandle, pBuffer, BufferLength);
+}
+
+
+
 
 #ifdef  USE_FULL_ASSERT
 

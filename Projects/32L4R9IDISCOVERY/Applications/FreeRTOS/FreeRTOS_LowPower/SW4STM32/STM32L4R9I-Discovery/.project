@@ -31,6 +31,21 @@
 			<locationURI>PARENT-2-PROJECT_LOC/readme.txt</locationURI>
 		</link>
 		<link>
+			<name>Application/FirmwareUpdate/app_update_patch.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Src/app_update_patch.c</locationURI>
+		</link>
+		<link>
+			<name>Application/FirmwareUpdate/fw_update_ymodem.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Src/fw_update_ymodem.c</locationURI>
+		</link>
+		<link>
+			<name>Application/FirmwareUpdate/ymodem.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Src/ymodem.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/main.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Src/main.c</locationURI>
@@ -59,6 +74,16 @@
 			<name>Drivers/STM32L4xx_HAL_Driver/stm32l4xx_hal_cortex.c</name>
 			<type>1</type>
 			<locationURI>PARENT-7-PROJECT_LOC/Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_cortex.c</locationURI>
+		</link>
+		<link>
+			<name>Drivers/STM32L4xx_HAL_Driver/stm32l4xx_hal_crc.c</name>
+			<type>1</type>
+			<locationURI>PARENT-7-PROJECT_LOC/Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_crc.c</locationURI>
+		</link>
+		<link>
+			<name>Drivers/STM32L4xx_HAL_Driver/stm32l4xx_hal_crc_ex.c</name>
+			<type>1</type>
+			<locationURI>PARENT-7-PROJECT_LOC/Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_crc_ex.c</locationURI>
 		</link>
 		<link>
 			<name>Drivers/STM32L4xx_HAL_Driver/stm32l4xx_hal_dma.c</name>
