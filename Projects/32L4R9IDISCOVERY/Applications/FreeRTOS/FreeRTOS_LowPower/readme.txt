@@ -19,6 +19,53 @@
   ******************************************************************************
   @endverbatim
 
+/*
+ * Copyright (c) 2021-2022 Firmware Modules Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files(the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and /or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions :
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+ * OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+ 
+Modifications and requirements to support demonstrating the https://github.com/firmwaremodules/stm32-secure-patching-bootloader
+
+- Enabled STLINK VCOM UART and bound to printf
+- Prints firmware and bootloader versions at application start (confirming access to bootloader secure engine)
+Since bootloader is multi-segment capable and knows about OSPI flash:
+- Added BSP_OSPI_NOR driver and initialization
+- Stores a string to the ExtFlashSection allocated to OSPI flash start area in application SLOT0 SEG1 area.
+- Enables OSPI memory mapped mode
+- Prints stored string to confirm memory mapped mode operation.
+
+
+Requirements:
+- Load the combined .hex file produced in Projects\Binary  e.g. BOOT_FreeRTOS-LowPower_STM32L4R9I-Discovery_<version>.hex
+The <version> is auto generated from the git repo information (git decribe --tags --always --dirty).
+Only the semantic version digits, if found, will be embedded in the firmware image header and reported through the API.
+This repository is tagged so that semantic version digits are found.
+- Use STM32CubeProgrammer to the load the .hex file.  **Select the correct external flash loader (STM32L4R9I-DISCO) before programming**
+- Use TeraTerm or similar tool to connect to STLINK COM port and observe output messages.
+- Power cycle board to start bootloader and application.
+
+
+
+
+
+
 @par Application Description
 
 How to enter and exit low-power mode with CMSIS RTOS API.

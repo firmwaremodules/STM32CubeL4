@@ -19,6 +19,10 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "stm32_secure_patching_bootloader_interface_v1.3.0.h"
+#include "stm32l4r9i_discovery_ospi_nor.h"
+#include <string.h>
+#include <stdio.h>
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -27,6 +31,19 @@
 #define QUEUE_SIZE        (uint32_t) 1
 /* Private variables ---------------------------------------------------------*/
 osMessageQId osQueue;
+
+/* Handle to STLINK VCOM UART for printf redirection */
+static UART_HandleTypeDef hUart;
+
+#define QSPI_MEMORY_MAPPED_NAME "OSPI"
+
+/* Content placed into OSPI flash in the "SEG1" area.  This emulates scheme that TouchGFx uses to
+place GUI assets in external flash while bundling them with the main application manufacturing and update binaries. */
+#if FW_UPDATE_VERSION == 1
+const char qspi_string[] LOCATION_EXTFLASH_ATTRIBUTE = "This is a version 1 message from " QSPI_MEMORY_MAPPED_NAME "!";
+#else
+const char qspi_string[] LOCATION_EXTFLASH_ATTRIBUTE = "This is a version 2 message from " QSPI_MEMORY_MAPPED_NAME "!";
+#endif
 
 /* The number of items the queue can hold.  This is 1 as the Rx task will
 remove items as they are added so the Tx task should always find the queue
@@ -80,6 +97,42 @@ int main(void)
   /* Initialize LED */
   BSP_LED_Init(LED1);
 
+  /* Initialize OSPI flash in memory mapped mode for direct access to flash read through memory bus */
+  BSP_OSPI_NOR_Init();
+  BSP_OSPI_NOR_EnableMemoryMappedMode();
+
+  /* Initialize STLINK VCOM UART */
+  hUart.Init.BaudRate = 115200U;
+  hUart.Init.WordLength = UART_WORDLENGTH_8B;
+  hUart.Init.StopBits = UART_STOPBITS_1;
+  hUart.Init.Parity = UART_PARITY_NONE;
+  hUart.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  hUart.Init.Mode = UART_MODE_RX | UART_MODE_TX;
+  hUart.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_RXOVERRUNDISABLE_INIT;
+  hUart.AdvancedInit.OverrunDisable = UART_ADVFEATURE_OVERRUN_DISABLE;
+  BSP_COM_Init(COM1, &hUart);
+
+  printf("Starting FreeRTOS_LowPower stm32-secure-patching-bootloader demo\n");
+
+  /* Get the firmware version embedded in the active slot header using the
+   * Secure Engine services.
+   */
+  SE_StatusTypeDef se_Status = SE_KO;
+  SE_APP_ActiveFwInfo sl_FwInfo;
+  memset(&sl_FwInfo, 0xFF, sizeof(SE_APP_ActiveFwInfo));
+  SE_APP_GetActiveFwInfo(&se_Status, &sl_FwInfo);
+  printf("Firmware Version: %ld.%ld.%ld\n",
+      FW_VERSION_MAJOR(sl_FwInfo.ActiveFwVersion),
+      FW_VERSION_MINOR(sl_FwInfo.ActiveFwVersion),
+      FW_VERSION_PATCH(sl_FwInfo.ActiveFwVersion));
+  char bootver[32];
+  memset(bootver, 0, sizeof(bootver));
+  SE_APP_GetBootVer(&se_Status, bootver, sizeof(bootver));
+  printf("Bootloader Version: %s\n", bootver);
+
+  /* If OSPI is working in memory mapped mode, should see the "This is a version..." message */
+  printf(QSPI_MEMORY_MAPPED_NAME " string: %s\n", qspi_string);
+
   /* Create the queue used by the two threads */
   osMessageQDef(osqueue, QUEUE_LENGTH, uint16_t);
   osQueue = osMessageCreate(osMessageQ(osqueue), NULL);
@@ -91,6 +144,8 @@ int main(void)
 
   osThreadDef(TxThread, QueueSendThread, osPriorityBelowNormal, 0, configMINIMAL_STACK_SIZE);
   osThreadCreate(osThread(TxThread), NULL);
+
+  printf("Starting scheduler\n");
 
   /* Start scheduler */
   osKernelStart();
@@ -311,6 +366,36 @@ void SystemClock_Config(void)
     /* Initialization Error */
     while(1);
   }
+}
+
+/* Adaptation for printf direction to STLINK VCOM UART */
+
+#if defined(__ICCARM__)
+#error not supported
+#elif defined(__CC_ARM)
+#error not supported
+#elif defined(__GNUC__)
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#define WRITE_PROTOTYPE int _write(int file, char* ptr, int len)
+#endif
+
+WRITE_PROTOTYPE
+{
+    HAL_UART_Transmit(&hUart, (uint8_t*)ptr, len, 1000);
+    return len;
+}
+
+/**
+  * @brief  Retargets the C library printf function to the USART.
+  * @param  None
+  * @retval ch
+  */
+PUTCHAR_PROTOTYPE
+{
+    /* e.g. write a character to the USART and Loop until the end of transmission */
+    HAL_UART_Transmit(&hUart, (uint8_t*)&ch, 1U, 1000);
+
+    return ch;
 }
 
 #ifdef  USE_FULL_ASSERT

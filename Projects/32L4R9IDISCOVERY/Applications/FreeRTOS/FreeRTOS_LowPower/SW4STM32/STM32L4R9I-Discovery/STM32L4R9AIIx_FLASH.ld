@@ -76,6 +76,7 @@ MEMORY
   ISR_VECTOR (rx) : ORIGIN = APPLI_region_intvec_start__, LENGTH = VECTOR_SIZE
   RAM (xrw)       : ORIGIN = APPLI_region_RAM_start, LENGTH = APPLI_region_RAM_length
   FLASH (rx)      : ORIGIN = APPLI_region_ROM_start, LENGTH = APPLI_region_ROM_length
+  QSPI (rx)       : ORIGIN = STM32_SECURE_PATCHING_BOOTLOADER_MULTISEG_START, LENGTH = 64M
 }
 
 /* Define output sections */
@@ -208,8 +209,19 @@ SECTIONS
     . = ALIGN(16) - 1; /* increment the location counter until next 16 bytes aligned address (-1 byte)   */
     BYTE(0);           /* allocate 1 byte (value is 0) to be a multiple of 16 bytes                      */
   } > FLASH
-
   
+  /* Section for placement of resources into QSPI segment 
+   * This is not contiguous with the "ROM" segment, but must also be aligned
+   * to 16 bytes for AES requirement.
+   */
+  ExtFlashSection : 
+  { 
+    *(ExtFlashSection) 
+
+    . = . + 1;         /* _edata=. is aligned on 8 bytes so could be aligned on 16 bytes: add 1 byte gap */
+    . = ALIGN(16) - 1; /* increment the location counter until next 16 bytes aligned address (-1 byte)   */
+    BYTE(0);           /* allocate 1 byte (value is 0) to be a multiple of 16 bytes                      */
+  } >QSPI 
 
   /* Remove information from the standard libraries */
   /DISCARD/ :
