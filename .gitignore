@@ -13,3 +13,4 @@ Release
 !Cipher_Key_AES_CBC.bin
 .vs
 out
+Binary/

@@ -51,7 +51,7 @@ Since bootloader is multi-segment capable and knows about OSPI flash:
 - Enables OSPI memory mapped mode
 - Prints stored string to confirm memory mapped mode operation.
 - Added YMODEM UART firmware update capability and wrapped into thread (ported from DemoApp and from ST's YMODEM updater)
-- 
+- Adapted YMODEM UART firmware update to use non-blocking RX interrupt mode with FreeRTOS message queues.
 
 
 Requirements:
@@ -106,7 +106,7 @@ APP RAMSTART:20001700 VTOR:08015200
 [  2.679] Verify slot 0 fw ver.
 [  2.889] Slot 0 has valid active firmware version 1.1.0
 [  2.894] Preparing to launch application in slot 0.
-Starting FreeRTOS_LowPower stm32-secure-patching-bootloader demo
+Starting FreeRTOS_LowPower stm32-secure-patching-bootloader demo - RX interrupt mode
 Firmware Version: 1.0.0
 Bootloader Version: v1.3.0
 OSPI string: This is a version 1 message from OSPI!
@@ -117,6 +117,7 @@ Starting scheduler
   Download a new firmware image or patch via YMODEM ----- 1
 
 
+Quick-test binaries in bin\ directory.
 
 
 @par Application Description

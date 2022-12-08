@@ -33,6 +33,9 @@
 /* Private variables ---------------------------------------------------------*/
 osMessageQId osQueue;
 
+/* UART RX queue */
+osMessageQId uartRxQueue;
+
 /* Handle to STLINK VCOM UART for printf redirection */
 static UART_HandleTypeDef hUart;
 
@@ -68,6 +71,7 @@ static void QueueSendThread(const void *argument);
 static void FirmwareUpdateThread(const void* argument);
 static void GPIO_ConfigAN(void);
 void SystemClock_Config(void);
+static void rx_int_start(void);
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -114,7 +118,7 @@ int main(void)
   hUart.AdvancedInit.OverrunDisable = UART_ADVFEATURE_OVERRUN_DISABLE;
   BSP_COM_Init(COM1, &hUart);
 
-  printf("Starting FreeRTOS_LowPower stm32-secure-patching-bootloader demo\n");
+  printf("Starting FreeRTOS_LowPower stm32-secure-patching-bootloader demo - RX interrupt mode\n");
 
   /* Get the firmware version embedded in the active slot header using the
    * Secure Engine services.
@@ -147,8 +151,18 @@ int main(void)
   osThreadDef(TxThread, QueueSendThread, osPriorityBelowNormal, 0, configMINIMAL_STACK_SIZE);
   osThreadCreate(osThread(TxThread), NULL);
 
+  /* Create a queue used to manage UART RX data flow.
+  Sized to accomodate about 2x 1K-YMODEM packet to handle variability in FirmwareUpdateThread run time.
+  If this goes above 2048 configTOTAL_HEAP_SIZE needs to be increased accordingly.
+  */
+  osMessageQDef(uartRxQueueDef, 2048 /* Needs to be larger than this => PACKET_1K_SIZE + PACKET_OVERHEAD_SIZE */, uint8_t);
+  uartRxQueue = osMessageCreate(osMessageQ(uartRxQueueDef), NULL);
+
   /* Thread to manage firmware update over YMODEM/UART.
-   This must be lower priority than other threads because of the way we're using HAL_UART's blocking timing mechanism. 
+  *  Something to note:
+  *         osPriorityNormal / queue size 1536  => transfer works smoothly
+  *         osPriorityLow / queue size 1536     => doesn't work (drops to menu during transfer)
+  *         osPriorityLow / queue size 2048     => transfer works smoothly
   */
   osThreadDef(FwUpdateThread, FirmwareUpdateThread, osPriorityLow, 0, configMINIMAL_STACK_SIZE);
   osThreadCreate(osThread(FwUpdateThread), NULL);
@@ -238,7 +252,12 @@ void PreSleepProcessing(uint32_t ulExpectedIdleTime)
   /* Suspend the HAL Tick */
   HAL_SuspendTick();
 
-  /*Enter to sleep Mode using the HAL function HAL_PWR_EnterSLEEPMode with WFI instruction*/
+  /*Enter to sleep Mode using the HAL function HAL_PWR_EnterSLEEPMode with WFI instruction
+  Just a note here:
+    FreeRTOS depends on Systick and therefore this "sleep" cannot turn off clocks -
+      i.e. STOP mode cannot be used, rendering this a rather light sleep.
+    A true tickless low-power OS would use a timer outside the main clock domain, i.e. the LSI/LSE and RTC.
+   */
   HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);  
 }
 
@@ -272,40 +291,41 @@ It uses blocking delays which we'd ideally avoid in an RTOS environment.
 */
 static void FirmwareUpdateThread(const void* argument)
 {
-    uint8_t key = 0U;
-
     PrintMainMenu();
+
+    /* Enable INT mode.  FreeRTOS has limitations on priority setting. */
+    HAL_NVIC_SetPriority(DISCOVERY_COM1_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY, 0);
+    HAL_NVIC_EnableIRQ(DISCOVERY_COM1_IRQn);
+
+    /* Start the UART RX flow */
+    rx_int_start();
 
     for (;;)
     {
-        while (1U)
+        /* Clean the input path */
+        Board_COM_Flush();
+
+        /* Receive input from UART through non-blocking RX techniques.
+        * Wait here for a character to be placed into the queue by the RX interrupt handler.
+         */
+        osEvent event = osMessageGet(uartRxQueue, osWaitForever);
+
+        if (event.status == osEventMessage)
         {
-            /* Clean the input path */
-            Board_COM_Flush();
+            uint8_t key = (uint8_t)event.value.v;
 
-            /* Receive input from UART.  Note that this timeout defines the
-             * loop period and the LED blink rate.  *Blocking delay*
-             * The RTOS works around this by preemptive task switching to higher priority
-             * threads.  However, during firmware update operations that access flash or
-             * the secure engine, there must be no other tasks that can use these resources.
-             * If this cannot be guaranteed, then task switching must be suspended around the
-             * APP_UPDATE_XXX APIs.
-             */
-            if (Board_COM_Receive(&key, 1U, RX_TIMEOUT) == BOARD_STATUS_OK)
+            switch (key)
             {
-                switch (key)
-                {
-                case '1':
-                    FW_UPDATE_YMODEM_Run();
-                    break;
-                default:
-                    printf("Invalid option\n");
-                    break;
-                }
-
-                /*Print Main Menu message*/
-                PrintMainMenu();
+            case '1':
+                FW_UPDATE_YMODEM_Run();
+                break;
+            default:
+                printf("Invalid option\n");
+                break;
             }
+
+            /*Print Main Menu message*/
+            PrintMainMenu();
         }
     }
 }
@@ -333,8 +353,10 @@ static void GPIO_ConfigAN(void)
 
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Pin = GPIO_PIN_All;
+  /* Keep the JTAG pins active to be able to use a debugger. */
+  GPIO_InitStruct.Pin = GPIO_PIN_All & (~(GPIO_PIN_13 | GPIO_PIN_14));
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  GPIO_InitStruct.Pin = GPIO_PIN_All;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
@@ -470,7 +492,28 @@ int Board_COM_Transmit(uint8_t* Data, uint16_t uDataLength, uint32_t uTimeout)
   */
 int Board_COM_Receive(uint8_t* Data, uint16_t uDataLength, uint32_t uTimeout)
 {
-    return HAL_UART_Receive(&hUart, (uint8_t*)Data, uDataLength, uTimeout);
+    /* Need to collect requested number of bytes or timeout. 
+    We'll do this by looping
+    */
+    int ret = HAL_ERROR;
+
+    while (Data && uDataLength)
+    {
+        osEvent event = osMessageGet(uartRxQueue, uTimeout);
+
+        if (event.status == osEventMessage)
+        {
+            *Data++ = (uint8_t)event.value.v;
+            uDataLength--;
+            ret = HAL_OK;
+        }
+        else /* timeout or some other error */
+        {
+            ret = HAL_TIMEOUT;
+            break;
+        }
+    }
+    return ret;
 }
 
 int Board_COM_Flush(void)
@@ -478,6 +521,41 @@ int Board_COM_Flush(void)
     /* Clean the input path */
     __HAL_UART_FLUSH_DRREGISTER(&hUart);
     return HAL_OK;
+}
+
+/* Character received when the int handler is called. */
+static uint8_t rx_char;
+
+static void rx_int_handler(void)
+{
+    osMessagePut(uartRxQueue, (uint32_t)rx_char, 0);
+}
+
+static void rx_int_start(void)
+{
+    /* F4 UART flags are all cleared through this procedure */
+    __HAL_UART_CLEAR_OREFLAG(&hUart);
+    HAL_UART_Receive_IT(&hUart, &rx_char, 1);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef* uart)
+{
+    if (uart)
+    {
+        if (uart == &hUart)
+        { 
+            /* queue the byte */
+            rx_int_handler();
+            /* wait for next byte */
+            rx_int_start();
+        }
+    }
+}
+
+/* "DISCOVER_COM1" UART for STLINK is UART2 */
+void USART2_IRQHandler(void)
+{
+    HAL_UART_IRQHandler(&hUart);
 }
 
 /* Bindings for YMODEM CRC */
